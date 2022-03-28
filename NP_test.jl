@@ -1,12 +1,13 @@
 using Oceananigans
 using Oceananigans.Units
 
+# define the size and max depth of the simulation
 const Nx = 5
 const Ny = 5
 const Nz = 48 # number of points in z
 const H = 1000 # maximum depth
 
-
+# create the grid of the model
 grid = RectilinearGrid(CPU(),
     size=(Nx,Ny,Nz),
     x=(-Nx/2,Nx/2),
@@ -15,11 +16,10 @@ grid = RectilinearGrid(CPU(),
     topology=(Periodic, Periodic, Bounded)
 )
 
-
-
+# define the turbulence closure of the model
 closure = ScalarDiffusivity(ν=1e-5, κ=1e-5)
 
-
+# constants for the NP model
 const μ₀ = 1/day   # surface growth rate
 const m = 0.015/day # mortality rate due to virus and zooplankton grazing
 
@@ -29,47 +29,92 @@ const kn = 0.75
 const kr = 0.5
 const α = 0.0538/day
 
-h = Field{Center, Center, Nothing}(grid) # defines a field that's reduced in the vertical direction
+# create the mld field that will be updated at every timestep
+h = Field{Center, Center, Nothing}(grid) 
 
-light = Field{Center, Center, Center}(grid)
+#light = Field{Center, Center, Center}(grid)
+#@inline light_growth(light) = (light*α)/sqrt(μ₀^2 + (light*α)^2)
+
+# evolution of the available light at the surface
 @inline L0(t) = t/10 + 14
+# light profile
+@inline light_growth(z,t) = (L0(t)*exp.(z*Kw)*α)/sqrt(μ₀^2 + (L0(t)*exp.(z*Kw)*α)^2)
 
-@inline light_growth(light) = (light*α)/sqrt(μ₀^2 + (light*α)^2)
+# nitrate and ammonium limiting
 @inline N_lim(N,Nr) = N/(N+kn) * kr/(Nr+kr)
 @inline Nr_lim(Nr) = Nr/(Nr+kr)
 
-P_forcing(x, y, z, t, P, N, Nr)  =   μ₀ * light_growth(light) * (N_lim(N,Nr) + Nr_lim(Nr)) * P - m * P^2
-N_forcing(x, y, z, t, P, N, Nr)  = - μ₀ * light_growth(light) * N_lim(N,Nr) * P
-Nr_forcing(x, y, z, t, P, N, Nr) = - μ₀ * light_growth(light) * N_lim(N,Nr) * P + m * P^2
+# functions for the NP model
+P_forcing(x, y, z, t, P, N, Nr)  =   μ₀ * light_growth(z,t) * (N_lim(N,Nr) + Nr_lim(Nr)) * P - m * P^2
+N_forcing(x, y, z, t, P, N, Nr)  = - μ₀ * light_growth(z,t) * N_lim(N,Nr) * P
+Nr_forcing(x, y, z, t, P, N, Nr) = - μ₀ * light_growth(z,t) * N_lim(N,Nr) * P + m * P^2
 
-
+# using the functions to determine the forcing
 P_dynamics = Forcing(P_forcing, field_dependencies = (:P,:N,:Nr))
 N_dynamics = Forcing(N_forcing, field_dependencies = (:P,:N,:Nr))
 Nr_dynamics = Forcing(Nr_forcing, field_dependencies = (:P,:N,:Nr))
 
+# create the model
 model = NonhydrostaticModel(grid = grid,
                             closure=closure,
                             tracers = (:b, :P, :N, :Nr),
                             buoyancy = BuoyancyTracer(),
                             forcing = (P=P_dynamics,N=N_dynamics,Nr=Nr_dynamics))
 
-
-const cz = -250
+# mld
+const cz = -200
+# gravity
 const g = 9.82
+# reference density
 const ρₒ = 1026
 
-# background density profile based on Argo data
-@inline bg(z) = 0.25*tanh(0.0027*(-653.3-z))-6.8*z/1e5+1027.56
-@inline B(x, y, z) = -(g/ρₒ)*bg(z)
-
+# initial buoyancy profile based on Argo data
+@inline B(x, y, z) = -(g/ρₒ)*0.25*tanh(0.0027*(-653.3-z))-6.8*z/1e5+1027.56
+# initial phytoplankton profile
 @inline P(x, y, z) = ifelse(z>cz,0.4,0)
 
+# setting the initial conditions
 set!(model;b=B,P=P,N=13,Nr=0)
 
+# create a simulation
+simulation = Simulation(model, Δt = 1hour, stop_time = 50days)
 
-simulation = Simulation(model, Δt = 1minutes, stop_time = 10minutes)
+# function to compute the mld
+function compute_mixed_layer_depth!(sim)
+    # get the buoyancy from the simulation
+    b = sim.model.tracers.b
+    # extract the model nodes
+    x,y,z = nodes((Center,Center,Center),sim.model.grid)
+    
+    # loop by x-axis
+    for i=1:length(x)
+        # loop by y axis
+        for j=1:length(y)
+            # get the density profile at (i,j)
+            ρⁿ = -(ρₒ/g)*Array(interior(b, i, j, :))
+            # surface density
+            ρs = ρⁿ[end]
+            # criterion for density increment
+            dρ = 0.01
+            # loop backwards (surface->bottom)
+            for k=0:length(z)-1
+                # if the density satisfies the criterium
+                if ρⁿ[end-k]>=ρs+dρ
+                    # update mld values
+                    h[i,j]=z[end-k]
+                    # break the loop
+                    break
+                end
+            end
+        end
+    end
+    return nothing
+end
 
+# add the function to the callbacks of the simulation
+simulation.callbacks[:compute_mld] = Callback(compute_mixed_layer_depth!)
 
+# function to update the light profile (not working)
 function compute_light_profile!(sim)
     x,y,z = nodes((Center,Center,Center),sim.model.grid)
     
@@ -90,33 +135,13 @@ function compute_light_profile!(sim)
     end
     return nothing
 end
+# simulation.callbacks[:compute_light] = Callback(compute_light_profile!)
 
-
-function compute_mixed_layer_depth!(sim)
-    b = sim.model.tracers.b
-    x,y,z = nodes((Center,Center,Center),sim.model.grid)
-    for i=1:length(x)
-        for j=1:length(y)
-            ρⁿ = -(ρₒ/g)*Array(interior(b, i, j, :))
-            ρs = ρⁿ[end]
-            dρ = 0.01
-            for k=0:length(z)-1
-                if ρⁿ[end-k]>=ρs+dρ
-                    h[i,j]=z[end-k]
-                    break
-                end
-            end
-        end
-    end
-    return nothing
-end
-
-simulation.callbacks[:compute_mld] = Callback(compute_mixed_layer_depth!)
-simulation.callbacks[:compute_light] = Callback(compute_light_profile!)
-
+# writing the output
 simulation.output_writers[:fields] =
     NetCDFOutputWriter(model, merge(model.velocities, model.tracers), filepath = "data/NP_output.nc",
                      schedule=TimeInterval(1minute))
 
 
+# run the simulation
 run!(simulation)
