@@ -31,8 +31,8 @@ const α = 0.0538/day
 
 # create the mld field that will be updated at every timestep
 h = Field{Center, Center, Nothing}(grid) 
+light = Field{Center, Center, Center}(grid)
 
-#light = Field{Center, Center, Center}(grid)
 #@inline light_growth(light) = (light*α)/sqrt(μ₀^2 + (light*α)^2)
 
 const L0 = 100
@@ -80,35 +80,42 @@ set!(model;b=B,P=P,N=13,Nr=0)
 # create a simulation
 simulation = Simulation(model, Δt = 1minutes, stop_time = 20days)
 
-# function to compute the mld
-function compute_mixed_layer_depth!(sim)
-    # get the buoyancy from the simulation
-    b = sim.model.tracers.b
-    # extract the model nodes
-    x,y,z = nodes((Center,Center,Center),sim.model.grid)
-    
-    # loop by x-axis
-    for i=1:length(x)
-        # loop by y axis
-        for j=1:length(y)
-            # get the density profile at (i,j)
-            ρⁿ = -(ρₒ/g)*Array(interior(b, i, j, :))
-            # surface density
-            ρs = ρⁿ[end]
-            # criterion for density increment
-            dρ = 0.01
-            # loop backwards (surface->bottom)
-            for k=0:length(z)-1
-                # if the density satisfies the criterium
-                if ρⁿ[end-k]>=ρs+dρ
-                    # update mld values
-                    h[i,j]=z[end-k]
-                    # break the loop
-                    break
-                end
-            end
-        end
+using KernelAbstractions: @index, @kernel
+using KernelAbstractions.Extras.LoopInfo: @unroll
+using Oceananigans.Architectures: device_event, architecture
+using Oceananigans.Utils: launch!
+
+@kernel function _compute_mixed_layer_depth(h, grid, b, Δb)
+    i, j = @index(Global, NTuple)
+
+    # Use this to set mld to bottom (note for irregular domains, this would have to change)
+    z_bottom = znode(Center(), Center(), Face(), i, j, 1, grid)
+    b_surface = @inbounds b[i, j, grid.Nz] # buoyancy at surface
+
+    @unroll for k in grid.Nz - 1 : -1 : 1 # scroll to point just above bottom
+        b_ijk = @inbounds b[i, j, k]
+        below_mixed_layer = @inbounds b_surface - b_ijk > Δb
+
+        # height of the cell interface _above_ the current depth
+        # TODO: use linear interpolation to obtain a smooth measure of mixed layer depth instead?
+        z_face_above = znode(Center(), Center(), Face(), i, j, k+1, grid)
+        z_below_mixed_layer_ij = ifelse(below_mixed_layer, z_face_above, z_bottom)
     end
+
+    # Note "-" since `h` is supposed to be "depth" rather than "height"
+    @inbounds h[i, j, 1] = - z_below_mixed_layer_ij
+end
+
+function compute_mixed_layer_depth!(h, b, Δb)
+    grid = h.grid
+    arch = architecture(grid)
+
+    event = launch!(arch, grid, :xy,
+                    _compute_mixed_layer_depth!, h, grid, b, Δb,
+                    dependencies = device_event(arch))
+
+    wait(device_event(arch), event)
+
     return nothing
 end
 
@@ -138,11 +145,13 @@ function compute_light_profile!(sim)
 end
 # simulation.callbacks[:compute_light] = Callback(compute_light_profile!)
 
+
+# merge light and h to the outputs
+outputs = merge(model.velocities, model.tracers, (; light, h)) # make a NamedTuple with all outputs
 # writing the output
 simulation.output_writers[:fields] =
-    NetCDFOutputWriter(model, merge(model.velocities, model.tracers), filepath = "data/NP_output.nc",
+    NetCDFOutputWriter(model, outputs, filepath = "data/NP_output.nc",
                      schedule=TimeInterval(1hour))
-
 
 using Printf
 
