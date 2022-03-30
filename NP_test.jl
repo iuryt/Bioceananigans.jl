@@ -2,22 +2,21 @@ using Oceananigans
 using Oceananigans.Units
 
 # define the size and max depth of the simulation
-const Nx = 2
-const Ny = 2
+const Ny = 100
 const Nz = 48 # number of points in z
 const H = 1000 # maximum depth
 
 # create the grid of the model
 grid = RectilinearGrid(GPU(),
-    size=(Nx,Ny,Nz),
-    x=(-Nx/2,Nx/2),
-    y=(-Ny/2,Ny/2),
+    size=(Ny,Nz),
+    y=(-(Ny/2)kilometers,(Ny/2)kilometers),
     z=(H * cos.(LinRange(π/2,0,Nz+1)) .- H)meters,
-    topology=(Periodic, Periodic, Bounded)
+    topology=(Flat, Periodic, Bounded)
 )
 
 # define the turbulence closure of the model
-closure = ScalarDiffusivity(ν=1e-5, κ=1e-5)
+horizontal_closure = ScalarDiffusivity(ν=1, κ=1)
+vertical_closure = ScalarDiffusivity(ν=1e-5, κ=1e-5)
 
 # constants for the NP model
 const μ₀ = 1/day   # surface growth rate
@@ -55,9 +54,13 @@ P_dynamics = Forcing(P_forcing, field_dependencies = (:P,:N,:Nr))
 N_dynamics = Forcing(N_forcing, field_dependencies = (:P,:N,:Nr))
 Nr_dynamics = Forcing(Nr_forcing, field_dependencies = (:P,:N,:Nr))
 
+
+coriolis = FPlane(latitude=60)
+
 # create the model
 model = NonhydrostaticModel(grid = grid,
-                            closure=closure,
+                            coriolis = coriolis,
+                            closure=(horizontal_closure,vertical_closure),
                             tracers = (:b, :P, :N, :Nr),
                             buoyancy = BuoyancyTracer(),
                             forcing = (P=P_dynamics,N=N_dynamics,Nr=Nr_dynamics))
@@ -69,8 +72,17 @@ const g = 9.82
 # reference density
 const ρₒ = 1026
 
-# initial buoyancy profile based on Argo data
-@inline B(x, y, z) = -(g/ρₒ)*0.25*tanh(0.0027*(-653.3-z))-6.8*z/1e5+1027.56
+
+# background density profile based on Argo data
+@inline bg(z) = 0.25*tanh(0.0027*(-653.3-z))-6.8*z/1e5+1027.56
+
+# decay function for fronts
+@inline decay(z) = (tanh((z+500)/300)+1)/2
+
+@inline front(x, y, z, cy) = tanh((y-cy)/12kilometers)
+@inline D(x, y, z) = bg(z) + 0.8*decay(z)*front(x,y,z,0)/4
+@inline B(x, y, z) = -(g/ρₒ)*D(x,y,z)
+
 # initial phytoplankton profile
 @inline P(x, y, z) = ifelse(z>cz,0.4,0)
 
@@ -80,74 +92,17 @@ set!(model;b=B,P=P,N=13,Nr=0)
 # create a simulation
 simulation = Simulation(model, Δt = 1minutes, stop_time = 20days)
 
-using KernelAbstractions: @index, @kernel
-using KernelAbstractions.Extras.LoopInfo: @unroll
-using Oceananigans.Architectures: device_event, architecture
-using Oceananigans.Utils: launch!
+wizard = TimeStepWizard(cfl=1.0, max_change=1.1, max_Δt=6minutes)
+simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(10))
 
-@kernel function _compute_mixed_layer_depth(h, grid, b, Δb)
-    i, j = @index(Global, NTuple)
-
-    # Use this to set mld to bottom (note for irregular domains, this would have to change)
-    z_bottom = znode(Center(), Center(), Face(), i, j, 1, grid)
-    b_surface = @inbounds b[i, j, grid.Nz] # buoyancy at surface
-
-    @unroll for k in grid.Nz - 1 : -1 : 1 # scroll to point just above bottom
-        b_ijk = @inbounds b[i, j, k]
-        below_mixed_layer = @inbounds b_surface - b_ijk > Δb
-
-        # height of the cell interface _above_ the current depth
-        # TODO: use linear interpolation to obtain a smooth measure of mixed layer depth instead?
-        z_face_above = znode(Center(), Center(), Face(), i, j, k+1, grid)
-        z_below_mixed_layer_ij = ifelse(below_mixed_layer, z_face_above, z_bottom)
-    end
-
-    # Note "-" since `h` is supposed to be "depth" rather than "height"
-    @inbounds h[i, j, 1] = - z_below_mixed_layer_ij
-end
-
-function compute_mixed_layer_depth!(h, b, Δb)
-    grid = h.grid
-    arch = architecture(grid)
-
-    event = launch!(arch, grid, :xy,
-                    _compute_mixed_layer_depth!, h, grid, b, Δb,
-                    dependencies = device_event(arch))
-
-    wait(device_event(arch), event)
-
-    return nothing
-end
-
+include("compute_mixed_layer_depth.jl")
+const Δb=(g/ρₒ) * 0.03
+compute_mixed_layer_depth!(simulation) = compute_mixed_layer_depth!(h, simulation.model.tracers.b, Δb)
 # add the function to the callbacks of the simulation
 simulation.callbacks[:compute_mld] = Callback(compute_mixed_layer_depth!)
 
-# function to update the light profile (not working)
-function compute_light_profile!(sim)
-    x,y,z = nodes((Center,Center,Center),sim.model.grid)
-    
-    dz = z[2:end]-z[1:end-1]
-    dz = [dz[1];dz]
-    
-    for i=1:length(x)
-        for j=1:length(y)
-            Li = L0(time(sim))*exp.(z*Kw)
-            
-            inmld = z.>h[i,j]
-            Li[inmld] .= sum(Li[inmld].*dz[inmld])/abs(h[i,j])
-            
-            for k=1:length(z)
-                light[i,j,k] = Li[k]
-            end
-        end
-    end
-    return nothing
-end
-# simulation.callbacks[:compute_light] = Callback(compute_light_profile!)
-
-
 # merge light and h to the outputs
-outputs = merge(model.velocities, model.tracers, (; light, h)) # make a NamedTuple with all outputs
+outputs = merge(model.velocities, model.tracers, (; h)) # make a NamedTuple with all outputs
 # writing the output
 simulation.output_writers[:fields] =
     NetCDFOutputWriter(model, outputs, filepath = "data/NP_output.nc",
