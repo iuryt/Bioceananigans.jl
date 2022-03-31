@@ -15,7 +15,7 @@ using Oceananigans.Grids
     mld_ij = z_surface
     searching_mld = true
     
-    @unroll for k in grid.Nz -1 : -1 : 1 # scroll to point just below surface
+    @unroll for k in grid.Nz -1 : -1 : 1 # scroll from point just below surface
         # buoyancy and buoyancy decrease
         b_ijk = @inbounds b[i, j, k]
         Δb_ijk = b_surface-b_ijk
