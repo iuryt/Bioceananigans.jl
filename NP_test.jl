@@ -32,22 +32,20 @@ const α = 0.0538/day
 h = Field{Center, Center, Nothing}(grid) 
 light = Field{Center, Center, Center}(grid)
 
-#@inline light_growth(light) = (light*α)/sqrt(μ₀^2 + (light*α)^2)
-
 const L0 = 100
 # evolution of the available light at the surface
 @inline L(z) = L0*exp.(z*Kw)
 # light profile
-@inline light_growth(z,t) = μ₀ * (L(z)*α)/sqrt(μ₀^2 + (L(z)*α)^2)
+@inline light_growth(z) = μ₀ * (L(z)*α)/sqrt(μ₀^2 + (L(z)*α)^2)
 
 # nitrate and ammonium limiting
 @inline N_lim(N,Nr) = (N/(N+kn)) * (kr/(Nr+kr))
 @inline Nr_lim(Nr) =  (Nr/(Nr+kr))
 
 # functions for the NP model
-P_forcing(x, y, z, t, P, N, Nr)  =   light_growth(z,t) * (N_lim(N,Nr) + Nr_lim(Nr)) * P - m * P^2
-N_forcing(x, y, z, t, P, N, Nr)  = - light_growth(z,t) * N_lim(N,Nr) * P
-Nr_forcing(x, y, z, t, P, N, Nr) = - light_growth(z,t) * Nr_lim(Nr) * P + m * P^2
+P_forcing(x, y, z, t, P, N, Nr)  =   light * (N_lim(N,Nr) + Nr_lim(Nr)) * P - m * P^2
+N_forcing(x, y, z, t, P, N, Nr)  = - light * N_lim(N,Nr) * P
+Nr_forcing(x, y, z, t, P, N, Nr) = - light * Nr_lim(Nr) * P + m * P^2
 
 # using the functions to determine the forcing
 P_dynamics = Forcing(P_forcing, field_dependencies = (:P,:N,:Nr))
@@ -89,20 +87,29 @@ const ρₒ = 1026
 # setting the initial conditions
 set!(model;b=B,P=P,N=13,Nr=0)
 
-# create a simulation
-simulation = Simulation(model, Δt = 1minutes, stop_time = 20days)
 
-wizard = TimeStepWizard(cfl=1.0, max_change=1.1, max_Δt=6minutes)
-simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(10))
+simulation = Simulation(model, Δt = 1minutes, stop_time = 2minutes)
 
-include("compute_mixed_layer_depth.jl")
+
+# # create a simulation
+# simulation = Simulation(model, Δt = 1minutes, stop_time = 20days)
+
+# wizard = TimeStepWizard(cfl=1.0, max_change=1.1, max_Δt=6minutes)
+# simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(10))
+
+include("src/compute_mixed_layer_depth.jl")
 const Δb=(g/ρₒ) * 0.03
 compute_mixed_layer_depth!(simulation) = compute_mixed_layer_depth!(h, simulation.model.tracers.b, Δb)
 # add the function to the callbacks of the simulation
 simulation.callbacks[:compute_mld] = Callback(compute_mixed_layer_depth!)
 
+include("src/compute_light.jl")
+compute_light!(simulation) = compute_light!(light, h, simulation.model.tracers.P, light_growth)
+# add the function to the callbacks of the simulation
+simulation.callbacks[:compute_light] = Callback(compute_light!)
+
 # merge light and h to the outputs
-outputs = merge(model.velocities, model.tracers, (; h)) # make a NamedTuple with all outputs
+outputs = merge(model.velocities, model.tracers, (; light, h)) # make a NamedTuple with all outputs
 # writing the output
 simulation.output_writers[:fields] =
     NetCDFOutputWriter(model, outputs, filepath = "data/NP_output.nc",
@@ -126,7 +133,8 @@ function print_progress(simulation)
     return nothing
 end
 
-simulation.callbacks[:progress] = Callback(print_progress, TimeInterval(1hour))
+# simulation.callbacks[:progress] = Callback(print_progress, TimeInterval(1hour))
+simulation.callbacks[:progress] = Callback(print_progress, IterationInterval(1))
 
 # run the simulation
 run!(simulation)
