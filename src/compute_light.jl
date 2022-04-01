@@ -3,11 +3,12 @@ using KernelAbstractions.Extras.LoopInfo: @unroll
 using Oceananigans.Architectures: device_event, architecture
 using Oceananigans.Utils: launch!
 using Oceananigans.Grids
+using Oceananigans.Operators: Δzᶜᶜᶜ
 
 @kernel function _compute_light!(light, grid, h, P, light_function)
     i, j = @index(Global, NTuple)
 
-    @unroll for k in 1 : grid.Nz
+    @unroll for k in grid.Nz : -1 : 1
         z_center = znode(Center(), Center(), Center(), i, j, k, grid)
         @inbounds light[i, j, k] = light_function(z_center)
     end
@@ -15,19 +16,17 @@ using Oceananigans.Grids
     light_sum = 0
     dz_sum = 0
     
-    @unroll for k in grid.Nz-1 : -1 : 1 # scroll to point just above the bottom       
+    @unroll for k in grid.Nz : -1 : 1 # scroll from surface to bottom       
         z_center = znode(Center(), Center(), Center(), i, j, k, grid)
-        z_center_above = znode(Center(), Center(), Center(), i, j, k-1, grid) 
         
-        h_ijk = @inbounds -h[i, j, k]
+        h_ijk = @inbounds h[i, j, k]
         
-        if z_center>h_ijk
+        if z_center > -h_ijk
             
-            light_ijk = @inbounds light[i, j, k]
-            Δz_ijk = z_center_above-z_center
+            Δz_ijk = Δzᶜᶜᶜ(i, j, k, grid)
             
-            light_sum += light_ijk*Δz_ijk
-            dz_sum += Δz_ijk
+            light_sum = light_sum + @inbounds light[i, j, k] * Δz_ijk 
+            dz_sum = dz_sum + Δz_ijk
             
         end
     end
