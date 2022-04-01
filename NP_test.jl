@@ -8,7 +8,7 @@ const Nz = 48 # number of points in z
 const H = 1000 # maximum depth
 
 # create the grid of the model
-grid = RectilinearGrid(CPU(),
+grid = RectilinearGrid(GPU(),
     size=(Ny+2sponge, Nz),
     halo=(3,3),
     y=(-(Ny/2 + sponge)kilometers, (Ny/2 + sponge)kilometers), 
@@ -35,8 +35,12 @@ const Kw = 0.059 # meter^-1
 const Kc = 0.041 # m^2 mg^-1
 const kn = 0.75
 const kr = 0.5
+
+#  https://doi.org/10.1029/2017GB005850
+const chl2c = 0.06 # average value for winter in North Atlantic
+
 const α = 0.0538/day
-const L0 = 100
+const Lₒ = 100
 
 
 # create the mld field that will be updated at every timestep
@@ -44,18 +48,19 @@ h = Field{Center, Center, Nothing}(grid)
 light = Field{Center, Center, Center}(grid)
 
 # evolution of the available light at the surface
-@inline L(z) = L0*exp.(z*Kw)
+@inline light_profile(z) = Lₒ*exp.(z*Kw)
 # light profile
-@inline light_growth(z) = μ₀ * (L(z)*α)/sqrt(μ₀^2 + (L(z)*α)^2)
+# @inline light_growth(z) = μ₀ * (L(z)*α)/sqrt(μ₀^2 + (L(z)*α)^2)
+@inline light_growth(L) = L
 
 # nitrate and ammonium limiting
 @inline N_lim(N, Nr) = (N/(N+kn)) * (kr/(Nr+kr))
 @inline Nr_lim(Nr) =  (Nr/(Nr+kr))
 
 # functions for the NP model
-@inline P_forcing(light, P, N, Nr)  =   light * (N_lim(N, Nr) + Nr_lim(Nr)) * P - m * P^2
-@inline N_forcing(light, P, N, Nr)  = - light * N_lim(N, Nr) * P
-@inline Nr_forcing(light, P, N, Nr) = - light * Nr_lim(Nr) * P + m * P^2
+@inline P_forcing(light, P, N, Nr)  =   μ₀ * (light*α)/sqrt(μ₀^2 + (light*α)^2) * (N_lim(N, Nr) + Nr_lim(Nr)) * P - m * P^2
+@inline N_forcing(light, P, N, Nr)  = - μ₀ * (light*α)/sqrt(μ₀^2 + (light*α)^2) * N_lim(N, Nr) * P
+@inline Nr_forcing(light, P, N, Nr) = - μ₀ * (light*α)/sqrt(μ₀^2 + (light*α)^2) * Nr_lim(Nr) * P + m * P^2
 
 # functions for the NP model
 @inline P_forcing(i, j, k, grid, clock, fields, p)  = @inbounds P_forcing(p.light[i, j, k], fields.P[i, j, k], fields.N[i, j, k], fields.Nr[i, j, k])
@@ -120,13 +125,19 @@ compute_mixed_layer_depth!(simulation) = compute_mixed_layer_depth!(h, simulatio
 simulation.callbacks[:compute_mld] = Callback(compute_mixed_layer_depth!)
 
 include("src/compute_light.jl")
-compute_light!(simulation) = compute_light!(light, h, simulation.model.tracers.P, light_growth)
+compute_light!(simulation) = compute_light!(light, h, simulation.model.tracers.P, light_profile, light_growth)
 # add the function to the callbacks of the simulation
 simulation.callbacks[:compute_light] = Callback(compute_light!)
 
-# zero_tracer(sim) = map!(c -> ifelse(c < 0, 0.0, c), parent(sim.model.tracers.N), parent(sim.model.tracers.N))
+# zeroing negative values
+zero_P(sim) = parent(sim.model.tracers.P) .= max.(0, parent(sim.model.tracers.P))
+simulation.callbacks[:zero_P] = Callback(zero_P)
+
 zero_N(sim) = parent(sim.model.tracers.N) .= max.(0, parent(sim.model.tracers.N))
 simulation.callbacks[:zero_N] = Callback(zero_N)
+
+zero_Nr(sim) = parent(sim.model.tracers.Nr) .= max.(0, parent(sim.model.tracers.Nr))
+simulation.callbacks[:zero_Nr] = Callback(zero_Nr)
 
 # merge light and h to the outputs
 outputs = merge(model.velocities, model.tracers, (; light, h)) # make a NamedTuple with all outputs
