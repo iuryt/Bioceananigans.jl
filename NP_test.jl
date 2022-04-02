@@ -8,7 +8,7 @@ const Nz = 48 # number of points in z
 const H = 1000 # maximum depth
 
 # create the grid of the model
-grid = RectilinearGrid(GPU(),
+grid = RectilinearGrid(CPU(),
     size=(Ny+2sponge, Nz),
     halo=(3,3),
     y=(-(Ny/2 + sponge)kilometers, (Ny/2 + sponge)kilometers), 
@@ -42,35 +42,36 @@ const chl2c = 0.06 # average value for winter in North Atlantic
 const α = 0.0538/day
 const Lₒ = 100
 
+const average_growth = false
 
 # create the mld field that will be updated at every timestep
 h = Field{Center, Center, Nothing}(grid) 
-light = Field{Center, Center, Center}(grid)
+light_growth = Field{Center, Center, Center}(grid)
 
 # evolution of the available light at the surface
-@inline light_profile(z) = Lₒ*exp.(z*Kw)
+@inline light_function(z) = Lₒ*exp.(z*Kw)
 # light profile
-# @inline light_growth(z) = μ₀ * (L(z)*α)/sqrt(μ₀^2 + (L(z)*α)^2)
-@inline light_growth(L) = L
+@inline light_growth_function(z) = μ₀ * (light_function(z)*α)/sqrt(μ₀^2 + (light_function(z)*α)^2)
+
 
 # nitrate and ammonium limiting
 @inline N_lim(N, Nr) = (N/(N+kn)) * (kr/(Nr+kr))
 @inline Nr_lim(Nr) =  (Nr/(Nr+kr))
 
 # functions for the NP model
-@inline P_forcing(light, P, N, Nr)  =   μ₀ * (light*α)/sqrt(μ₀^2 + (light*α)^2) * (N_lim(N, Nr) + Nr_lim(Nr)) * P - m * P^2
-@inline N_forcing(light, P, N, Nr)  = - μ₀ * (light*α)/sqrt(μ₀^2 + (light*α)^2) * N_lim(N, Nr) * P
-@inline Nr_forcing(light, P, N, Nr) = - μ₀ * (light*α)/sqrt(μ₀^2 + (light*α)^2) * Nr_lim(Nr) * P + m * P^2
+@inline P_forcing(light_growth, P, N, Nr)  =   light_growth * (N_lim(N, Nr) + Nr_lim(Nr)) * P - m * P^2
+@inline N_forcing(light_growth, P, N, Nr)  = - light_growth * N_lim(N, Nr) * P
+@inline Nr_forcing(light_growth, P, N, Nr) = - light_growth * Nr_lim(Nr) * P + m * P^2
 
 # functions for the NP model
-@inline P_forcing(i, j, k, grid, clock, fields, p)  = @inbounds P_forcing(p.light[i, j, k], fields.P[i, j, k], fields.N[i, j, k], fields.Nr[i, j, k])
-@inline N_forcing(i, j, k, grid, clock, fields, p)  = @inbounds N_forcing(p.light[i, j, k], fields.P[i, j, k], fields.N[i, j, k], fields.Nr[i, j, k])
-@inline Nr_forcing(i, j, k, grid, clock, fields, p) = @inbounds Nr_forcing(p.light[i, j, k], fields.P[i, j, k], fields.N[i, j, k], fields.Nr[i, j, k])
+@inline P_forcing(i, j, k, grid, clock, fields, p)  = @inbounds P_forcing(p.light_growth[i, j, k], fields.P[i, j, k], fields.N[i, j, k], fields.Nr[i, j, k])
+@inline N_forcing(i, j, k, grid, clock, fields, p)  = @inbounds N_forcing(p.light_growth[i, j, k], fields.P[i, j, k], fields.N[i, j, k], fields.Nr[i, j, k])
+@inline Nr_forcing(i, j, k, grid, clock, fields, p) = @inbounds Nr_forcing(p.light_growth[i, j, k], fields.P[i, j, k], fields.N[i, j, k], fields.Nr[i, j, k])
 
 # using the functions to determine the forcing
-P_dynamics = Forcing(P_forcing, discrete_form=true, parameters=(; light))
-N_dynamics = Forcing(N_forcing, discrete_form=true, parameters=(; light))
-Nr_dynamics = Forcing(Nr_forcing, discrete_form=true, parameters=(; light))
+P_dynamics = Forcing(P_forcing, discrete_form=true, parameters=(; light_growth))
+N_dynamics = Forcing(N_forcing, discrete_form=true, parameters=(; light_growth))
+Nr_dynamics = Forcing(Nr_forcing, discrete_form=true, parameters=(; light_growth))
 
 #--------------- Instantiate Model
 
@@ -88,7 +89,7 @@ model = NonhydrostaticModel(grid = grid,
 
 #--------------- Initial Conditions
 
-const cz = -200 # mld
+const cz = -200 # max. depth of phytoplankton
 const g = 9.82 # gravity
 const ρₒ = 1026 # reference density
 
@@ -118,16 +119,17 @@ simulation = Simulation(model, Δt = 1minutes, stop_time = 20days)
 wizard = TimeStepWizard(cfl=1.0, max_change=1.1, max_Δt=1hour)
 simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(10))
 
-include("src/compute_mixed_layer_depth.jl")
+# buoyancy decrease criterium for determining the mixed-layer depth
 const Δb=(g/ρₒ) * 0.03
+include("src/compute_mixed_layer_depth.jl")
 compute_mixed_layer_depth!(simulation) = compute_mixed_layer_depth!(h, simulation.model.tracers.b, Δb)
 # add the function to the callbacks of the simulation
 simulation.callbacks[:compute_mld] = Callback(compute_mixed_layer_depth!)
 
-include("src/compute_light.jl")
-compute_light!(simulation) = compute_light!(light, h, simulation.model.tracers.P, light_profile, light_growth)
+include("src/compute_light_growth.jl")
+compute_light_growth!(simulation) = compute_light_growth!(light_growth, h, simulation.model.tracers.P, light_function, light_growth_function, average_growth)
 # add the function to the callbacks of the simulation
-simulation.callbacks[:compute_light] = Callback(compute_light!)
+simulation.callbacks[:compute_light_growth] = Callback(compute_light_growth!)
 
 # zeroing negative values
 zero_P(sim) = parent(sim.model.tracers.P) .= max.(0, parent(sim.model.tracers.P))
@@ -140,11 +142,11 @@ zero_Nr(sim) = parent(sim.model.tracers.Nr) .= max.(0, parent(sim.model.tracers.
 simulation.callbacks[:zero_Nr] = Callback(zero_Nr)
 
 # merge light and h to the outputs
-outputs = merge(model.velocities, model.tracers, (; light, h)) # make a NamedTuple with all outputs
+outputs = merge(model.velocities, model.tracers, (; light_growth, h)) # make a NamedTuple with all outputs
 
 # writing the output
 simulation.output_writers[:fields] =
-    NetCDFOutputWriter(model, outputs, filepath = "data/NP_output.nc",
+    NetCDFOutputWriter(model, outputs, filepath = "data/output.nc",
                      schedule=TimeInterval(3hours))
 
 using Printf
