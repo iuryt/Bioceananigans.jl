@@ -42,7 +42,8 @@ const chl2c = 0.06 # average value for winter in North Atlantic
 const α = 0.0538/day
 const Lₒ = 100
 
-const average_growth = false
+const average = :growth
+const shading = true
 
 # create the mld field that will be updated at every timestep
 h = Field{Center, Center, Nothing}(grid) 
@@ -127,7 +128,7 @@ compute_mixed_layer_depth!(simulation) = compute_mixed_layer_depth!(h, simulatio
 simulation.callbacks[:compute_mld] = Callback(compute_mixed_layer_depth!)
 
 include("src/compute_light_growth.jl")
-compute_light_growth!(simulation) = compute_light_growth!(light_growth, h, simulation.model.tracers.P, light_function, light_growth_function, average_growth)
+compute_light_growth!(simulation) = compute_light_growth!(light_growth, h, simulation.model.tracers.P, light_function, light_growth_function, average, shading)
 # add the function to the callbacks of the simulation
 simulation.callbacks[:compute_light_growth] = Callback(compute_light_growth!)
 
@@ -146,7 +147,7 @@ outputs = merge(model.velocities, model.tracers, (; light_growth, h)) # make a N
 
 # writing the output
 simulation.output_writers[:fields] =
-    NetCDFOutputWriter(model, outputs, filepath = "data/output.nc",
+    NetCDFOutputWriter(model, outputs, filepath = "data/output_average-$(average)_shading-$(shading).nc",
                      schedule=TimeInterval(3hours))
 
 using Printf
