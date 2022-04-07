@@ -8,7 +8,7 @@ const Nz = 48 # number of points in z
 const H = 1000 # maximum depth
 
 # create the grid of the model
-grid = RectilinearGrid(CPU(),
+grid = RectilinearGrid(GPU(),
     size=(Ny+2sponge, Nz),
     halo=(3,3),
     y=(-(Ny/2 + sponge)kilometers, (Ny/2 + sponge)kilometers), 
