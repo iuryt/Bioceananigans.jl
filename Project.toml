@@ -1,0 +1,10 @@
+name = "Bioceananigans"
+uuid = "ace54579-eb90-495b-a991-2a6890241a52"
+authors = ["iury simoes-sousa <iuryt@pm.me>"]
+version = "0.1.0"
+
+[deps]
+Oceananigans = "9e8cae18-63c1-5223-a75c-80ca9d6e9a09"
+
+[compat]
+Oceananigans = "0.73.6"
