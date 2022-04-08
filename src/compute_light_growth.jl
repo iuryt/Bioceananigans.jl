@@ -8,6 +8,8 @@ using Oceananigans.Operators: Δzᶜᶜᶜ
 @kernel function _compute_light_growth!(light, grid, h, P, light_function, light_growth_function, average_code, shading)
     i, j = @index(Global, NTuple)
 
+    h_ij = @inbounds h[i, j]
+    
     chlinteg = 0
     
     @unroll for k in grid.Nz : -1 : 1
@@ -31,9 +33,7 @@ using Oceananigans.Operators: Δzᶜᶜᶜ
         @unroll for k in grid.Nz : -1 : 1 # scroll from surface to bottom       
             z_center = znode(Center(), Center(), Center(), i, j, k, grid)
 
-            h_ijk = @inbounds h[i, j, k]
-
-            if z_center > -h_ijk
+            if z_center > - h_ij
 
                 Δz_ijk = Δzᶜᶜᶜ(i, j, k, grid)
 
@@ -46,9 +46,7 @@ using Oceananigans.Operators: Δzᶜᶜᶜ
         @unroll for k in grid.Nz : -1 : 1 # scroll to point just above the bottom       
             z_center = znode(Center(), Center(), Center(), i, j, k, grid)
 
-            h_ijk = @inbounds h[i, j, k]
-
-            if z_center > -h_ijk
+            if z_center > - h_ij
                 @inbounds light[i, j, k] = light_sum/dz_sum     
             end
         end
