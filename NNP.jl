@@ -40,7 +40,6 @@ const kr = 0.5
 const chl2c = 0.06 # average value for winter in North Atlantic
 
 const α = 0.0538/day
-const Lₒ = 100
 
 const average = :growth
 const shading = true
@@ -49,10 +48,13 @@ const shading = true
 h = Field{Center, Center, Nothing}(grid) 
 light_growth = Field{Center, Center, Center}(grid)
 
+
+# time evolution of shortwave radiation (North Atlantic)
+@inline Lₒ(t) = 116.5 * sin( 2π * ( t + 50 )days / 375.7 + 1.3 ) + 132.3
 # evolution of the available light at the surface
-@inline light_function(z) = Lₒ*exp.(z*Kw)
+@inline light_function(t, z) = 0.43 * Lₒ(t) * exp( z * Kw )
 # light profile
-@inline light_growth_function(z) = μ₀ * (light_function(z)*α)/sqrt(μ₀^2 + (light_function(z)*α)^2)
+@inline light_growth_function(light) = μ₀ * ( light * α ) / sqrt( μ₀^2 + ( light * α )^2 )
 
 
 # nitrate and ammonium limiting
@@ -128,7 +130,7 @@ compute_mixed_layer_depth!(simulation) = compute_mixed_layer_depth!(h, simulatio
 simulation.callbacks[:compute_mld] = Callback(compute_mixed_layer_depth!)
 
 include("src/compute_light_growth.jl")
-compute_light_growth!(simulation) = compute_light_growth!(light_growth, h, simulation.model.tracers.P, light_function, light_growth_function, average, shading)
+compute_light_growth!(simulation) = compute_light_growth!(light_growth, h, simulation.model.tracers.P, light_function, light_growth_function, time(simulation), average, shading)
 # add the function to the callbacks of the simulation
 simulation.callbacks[:compute_light_growth] = Callback(compute_light_growth!)
 
