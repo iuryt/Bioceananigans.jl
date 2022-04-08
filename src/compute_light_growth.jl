@@ -5,7 +5,7 @@ using Oceananigans.Utils: launch!
 using Oceananigans.Grids
 using Oceananigans.Operators: Δzᶜᶜᶜ
 
-@kernel function _compute_light_growth!(light, grid, h, P, light_function, light_growth_function, average_code, shading)
+@kernel function _compute_light_growth!(light, grid, h, P, light_function, light_growth_function, simulation_time, average_code, shading)
     i, j = @index(Global, NTuple)
 
     h_ij = @inbounds h[i, j]
@@ -19,9 +19,9 @@ using Oceananigans.Operators: Δzᶜᶜᶜ
         z_center = znode(Center(), Center(), Center(), i, j, k, grid)
         
         if average_code==1
-            @inbounds light[i, j, k] = light_growth_function(light_function(z_center)/exp(chlinteg*Kc))
+            @inbounds light[i, j, k] = light_growth_function(light_function(simulation_time, z_center)/exp(chlinteg*Kc))
         elseif (average_code==0)|(average_code==2)
-            @inbounds light[i, j, k] = light_function(z_center)/exp(chlinteg*Kc)
+            @inbounds light[i, j, k] = light_function(simulation_time, z_center)/exp(chlinteg*Kc)
         end
         
     end
@@ -59,7 +59,7 @@ using Oceananigans.Operators: Δzᶜᶜᶜ
     end
 end
 
-function compute_light_growth!(light, h, P, light_function, light_growth_function, average=nothing, shading=false)
+function compute_light_growth!(light, h, P, light_function, light_growth_function, simulation_time, average=nothing, shading=false)
     grid = h.grid
     arch = architecture(grid)
 
@@ -75,7 +75,7 @@ function compute_light_growth!(light, h, P, light_function, light_growth_functio
     end
     
     event = launch!(arch, grid, :xy,
-                    _compute_light_growth!, light, grid, h, P, light_function, light_growth_function, average_code, shading,
+                    _compute_light_growth!, light, grid, h, P, light_function, light_growth_function, simulation_time, average_code, shading,
                     dependencies = device_event(arch))
 
     wait(device_event(arch), event)
