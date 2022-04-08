@@ -1,3 +1,8 @@
+module LightGrowth
+
+export LightGrowth!
+
+
 using KernelAbstractions: @index, @kernel
 using KernelAbstractions.Extras.LoopInfo: @unroll
 using Oceananigans.Architectures: device_event, architecture
@@ -59,7 +64,7 @@ using Oceananigans.Operators: Δzᶜᶜᶜ
     end
 end
 
-function compute_light_growth!(light, h, P, light_function, light_growth_function, simulation_time, average=nothing, shading=false)
+function LightGrowth!(light, h, P, light_function, light_growth_function, simulation_time, average=nothing, shading=false)
     grid = h.grid
     arch = architecture(grid)
 
@@ -82,3 +87,5 @@ function compute_light_growth!(light, h, P, light_function, light_growth_functio
 
     return nothing
 end
+
+end #module

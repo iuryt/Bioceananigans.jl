@@ -1,3 +1,8 @@
+module MixedLayerDepth
+
+export MixedLayerDepth!
+
+
 using KernelAbstractions: @index, @kernel
 using KernelAbstractions.Extras.LoopInfo: @unroll
 using Oceananigans.Architectures: device_event, architecture
@@ -45,7 +50,7 @@ using Oceananigans.Grids
     @inbounds h[i, j, 1] = mld_ij
 end
 
-function compute_mixed_layer_depth!(h, b, Δb)
+function MixedLayerDepth!(h, b, Δb)
     grid = h.grid
     arch = architecture(grid)
 
@@ -57,3 +62,5 @@ function compute_mixed_layer_depth!(h, b, Δb)
 
     return nothing
 end
+
+end #module
