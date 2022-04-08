@@ -50,7 +50,7 @@ light_growth = Field{Center, Center, Center}(grid)
 
 
 # time evolution of shortwave radiation (North Atlantic)
-@inline Lₒ(t) = 116.5 * sin( 2π * ( t + 50 )days / 375.7 + 1.3 ) + 132.3
+@inline Lₒ(t) = 116.5 * sin( 2π * ( t / days + 50 ) / 375.7 + 1.3 ) + 132.3
 # evolution of the available light at the surface
 @inline light_function(t, z) = 0.43 * Lₒ(t) * exp( z * Kw )
 # light profile
