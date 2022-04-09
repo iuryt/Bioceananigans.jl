@@ -1,7 +1,7 @@
 
 <!-- Title -->
 <h1 align="center">
-  # Bioceananigans.jl
+  Bioceananigans.jl
 </h1>
 
 <!-- description -->
