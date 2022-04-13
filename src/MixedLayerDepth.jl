@@ -1,7 +1,4 @@
-module MixedLayerDepth
-
 export MixedLayerDepth!
-
 
 using KernelAbstractions: @index, @kernel
 using KernelAbstractions.Extras.LoopInfo: @unroll
@@ -48,8 +45,14 @@ using Oceananigans.Grids
 
     # Note "-" since `h` is supposed to be "depth" rather than "height"
     @inbounds h[i, j, 1] = mld_ij
+    
 end
 
+"""
+    MixedLayerDepth!(h, b, Δb)
+
+Compute and update the mixed layer depth field (h) from the buoyancy field (b) using the buoyancy decrease criterium (Δb).
+"""
 function MixedLayerDepth!(h, b, Δb)
     grid = h.grid
     arch = architecture(grid)
@@ -62,5 +65,3 @@ function MixedLayerDepth!(h, b, Δb)
 
     return nothing
 end
-
-end #module

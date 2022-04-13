@@ -1,32 +1,20 @@
-using Bioceananigans
-
+using Pkg
+Pkg.activate(normpath(joinpath(@__DIR__, "..")))
 
 using Oceananigans
 using Oceananigans.Units
+using Bioceananigans
 
 # define the size and max depth of the simulation
-const sponge = 20
-const Ny = 100
 const Nz = 48 # number of points in z
 const H = 1000 # maximum depth
 
 # create the grid of the model
 grid = RectilinearGrid(GPU(),
-    size=(Ny+2sponge, Nz),
-    halo=(3,3),
-    y=(-(Ny/2 + sponge)kilometers, (Ny/2 + sponge)kilometers), 
+    size=(Nz),
     z=(H * cos.(LinRange(π/2,0,Nz+1)) .- H)meters,
-    topology=(Flat, Bounded, Bounded)
+    topology=(Flat, Flat, Bounded)
 )
-
-
-coriolis = FPlane(latitude=60)
-
-@inline νh(x,y,z,t) = ifelse((y>-(Ny/2)kilometers)&(y<(Ny/2)kilometers), 1, 100)
-horizontal_closure = HorizontalScalarDiffusivity(ν=νh, κ=νh)
-
-@inline νz(x,y,z,t) = ifelse((y>-(Ny/2)kilometers)&(y<(Ny/2)kilometers), 1e-5, 1e-3)
-vertical_closure = ScalarDiffusivity(ν=νz, κ=νz)
 
 
 #--------------- NP Model
@@ -35,7 +23,6 @@ vertical_closure = ScalarDiffusivity(ν=νz, κ=νz)
 const μ₀ = 1/day   # surface growth rate
 const m = 0.015/day # mortality rate due to virus and zooplankton grazing
 const Kw = 0.059 # meter^-1
-const Kc = 0.041 # m^2 mg^-1
 const kn = 0.75
 const kr = 0.5
 
@@ -85,8 +72,7 @@ Nr_dynamics = Forcing(Nr_forcing, discrete_form=true, parameters=(; light_growth
 model = NonhydrostaticModel(grid = grid,
                             advection = WENO5(),
                             timestepper = :RungeKutta3,
-                            coriolis = coriolis,
-                            closure=(horizontal_closure, vertical_closure),
+                            closure=ScalarDiffusivity(ν=1e-5, κ=1e-5),
                             tracers = (:b, :P, :N, :Nr),
                             buoyancy = BuoyancyTracer(),
                             forcing = (P=P_dynamics, N=N_dynamics, Nr=Nr_dynamics))
@@ -103,12 +89,7 @@ const ρₒ = 1026 # reference density
 # background density profile based on Argo data
 @inline bg(z) = 0.25*tanh(0.0027*(-653.3-z))-6.8*z/1e5+1027.56
 
-# decay function for fronts
-@inline decay(z) = (tanh((z+500)/300)+1)/2
-
-@inline front(x, y, z, cy) = tanh((y-cy)/12kilometers)
-@inline D(x, y, z) = bg(z) + 0.8*decay(z)*front(x, y, z, 0)/4
-@inline B(x, y, z) = -(g/ρₒ)*D(x, y, z)
+@inline B(x, y, z) = -(g/ρₒ) * bg(z)
 
 # initial phytoplankton profile
 @inline P(x, y, z) = ifelse(z>cz, 0.4, 0)
@@ -127,13 +108,11 @@ simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(10))
 
 # buoyancy decrease criterium for determining the mixed-layer depth
 const Δb=(g/ρₒ) * 0.03
-include("src/compute_mixed_layer_depth.jl")
-compute_mixed_layer_depth!(simulation) = compute_mixed_layer_depth!(h, simulation.model.tracers.b, Δb)
+compute_mixed_layer_depth!(simulation) = MixedLayerDepth!(h, simulation.model.tracers.b, Δb)
 # add the function to the callbacks of the simulation
 simulation.callbacks[:compute_mld] = Callback(compute_mixed_layer_depth!)
 
-include("src/compute_light_growth.jl")
-compute_light_growth!(simulation) = compute_light_growth!(light_growth, h, simulation.model.tracers.P, light_function, light_growth_function, time(simulation), average, shading)
+compute_light_growth!(simulation) = LightGrowth!(light_growth, h, simulation.model.tracers.P, light_function, light_growth_function, time(simulation), average, shading, chl2c)
 # add the function to the callbacks of the simulation
 simulation.callbacks[:compute_light_growth] = Callback(compute_light_growth!)
 
@@ -153,7 +132,7 @@ outputs = merge(model.velocities, model.tracers, (; light_growth, h)) # make a N
 # writing the output
 simulation.output_writers[:fields] =
     NetCDFOutputWriter(model, outputs, filepath = "data/output_average-$(average)_shading-$(shading).nc",
-                     schedule=TimeInterval(3hours))
+                       schedule=TimeInterval(3hours))
 
 using Printf
 

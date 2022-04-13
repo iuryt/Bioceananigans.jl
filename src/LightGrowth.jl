@@ -1,7 +1,4 @@
-module LightGrowth
-
 export LightGrowth!
-
 
 using KernelAbstractions: @index, @kernel
 using KernelAbstractions.Extras.LoopInfo: @unroll
@@ -10,7 +7,8 @@ using Oceananigans.Utils: launch!
 using Oceananigans.Grids
 using Oceananigans.Operators: Δzᶜᶜᶜ
 
-@kernel function _compute_light_growth!(light, grid, h, P, light_function, light_growth_function, simulation_time, average_code, shading)
+@kernel function _compute_light_growth!(light, grid, h, P, light_function, light_growth_function, simulation_time, 
+                                         average_code, shading, chl2c, Kc)
     i, j = @index(Global, NTuple)
 
     h_ij = @inbounds h[i, j]
@@ -62,9 +60,16 @@ using Oceananigans.Operators: Δzᶜᶜᶜ
             @inbounds light[i, j, k] = light_growth_function(light[i, j, k])
         end
     end
+    
 end
 
-function LightGrowth!(light, h, P, light_function, light_growth_function, simulation_time, average=nothing, shading=false)
+"""
+    LightGrowth!(light, h, P, light_function, light_growth_function, simulation_time, average=nothing, shading=false, chl2c=0.02, Kc = 0.041)
+
+Compute and update the light growth for Phytoplankton.
+"""
+function LightGrowth!(light, h, P, light_function, light_growth_function, simulation_time, 
+                      average=nothing, shading=false, chl2c=0.02, Kc = 0.041)
     grid = h.grid
     arch = architecture(grid)
 
@@ -80,12 +85,11 @@ function LightGrowth!(light, h, P, light_function, light_growth_function, simula
     end
     
     event = launch!(arch, grid, :xy,
-                    _compute_light_growth!, light, grid, h, P, light_function, light_growth_function, simulation_time, average_code, shading,
+                    _compute_light_growth!, light, grid, h, P, light_function, light_growth_function, 
+                    simulation_time, average_code, shading, chl2c,
                     dependencies = device_event(arch))
 
     wait(device_event(arch), event)
 
     return nothing
 end
-
-end #module
