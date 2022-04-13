@@ -1,5 +1,3 @@
-export LightGrowth!
-
 using KernelAbstractions: @index, @kernel
 using KernelAbstractions.Extras.LoopInfo: @unroll
 using Oceananigans.Architectures: device_event, architecture

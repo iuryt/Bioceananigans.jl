@@ -1,6 +1,3 @@
-using Pkg
-Pkg.activate(normpath(joinpath(@__DIR__, "..")))
-
 using Oceananigans
 using Oceananigans.Units
 using Bioceananigans
@@ -10,7 +7,7 @@ const Nz = 48 # number of points in z
 const H = 1000 # maximum depth
 
 # create the grid of the model
-grid = RectilinearGrid(GPU(),
+grid = RectilinearGrid(CPU(),
     size=(Nz),
     z=(H * cos.(LinRange(π/2,0,Nz+1)) .- H)meters,
     topology=(Flat, Flat, Bounded)

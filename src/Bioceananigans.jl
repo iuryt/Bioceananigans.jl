@@ -1,7 +1,7 @@
 module Bioceananigans
 
 export LightGrowth!
-export MixedLayerDepth
+export MixedLayerDepth!
 
 include("LightGrowth.jl")
 include("MixedLayerDepth.jl")
