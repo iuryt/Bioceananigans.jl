@@ -101,7 +101,7 @@ set!(model; b=B, P=P, N=13, Nr=0)
 #--------------- Simulation
 
 # # create a simulation
-simulation = Simulation(model, Δt = 1minutes, stop_time = 20days)
+simulation = Simulation(model, Δt = 1minutes, stop_time = 5days)
 
 wizard = TimeStepWizard(cfl=1.0, max_change=1.1, max_Δt=1hour)
 simulation.callbacks[:wizard] = Callback(wizard, IterationInterval(10))
@@ -126,13 +126,13 @@ simulation.callbacks[:zero_N] = Callback(zero_N)
 zero_Nr(sim) = parent(sim.model.tracers.Nr) .= max.(0, parent(sim.model.tracers.Nr))
 simulation.callbacks[:zero_Nr] = Callback(zero_Nr)
 
-# merge light and h to the outputs
-outputs = merge(model.velocities, model.tracers, (; light_growth, h)) # make a NamedTuple with all outputs
+# # merge light and h to the outputs
+# outputs = merge(model.velocities, model.tracers, (; light_growth, h)) # make a NamedTuple with all outputs
 
-# writing the output
-simulation.output_writers[:fields] =
-    NetCDFOutputWriter(model, outputs, filepath = "data/output_average-$(average)_shading-$(shading).nc",
-                       schedule=TimeInterval(3hours))
+# # writing the output
+# simulation.output_writers[:fields] =
+#     NetCDFOutputWriter(model, outputs, filepath = "data/output_average-$(average)_shading-$(shading).nc",
+#                        schedule=TimeInterval(3hours))
 
 using Printf
 
