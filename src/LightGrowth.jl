@@ -84,7 +84,7 @@ function LightGrowth!(light, h, P, light_function, light_growth_function, simula
     
     event = launch!(arch, grid, :xy,
                     _compute_light_growth!, light, grid, h, P, light_function, light_growth_function, 
-                    simulation_time, average_code, shading, chl2c,
+                    simulation_time, average_code, shading, chl2c, Kc,
                     dependencies = device_event(arch))
 
     wait(device_event(arch), event)

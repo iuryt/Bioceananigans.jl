@@ -1,3 +1,6 @@
+# using Pkg
+# Pkg.activate(normpath(joinpath(@__DIR__, "..")))
+
 using Oceananigans
 using Oceananigans.Units
 using Bioceananigans
@@ -7,7 +10,7 @@ const Nz = 48 # number of points in z
 const H = 1000 # maximum depth
 
 # create the grid of the model
-grid = RectilinearGrid(CPU(),
+grid = RectilinearGrid(GPU(),
     size=(Nz),
     z=(H * cos.(LinRange(π/2,0,Nz+1)) .- H)meters,
     topology=(Flat, Flat, Bounded)
@@ -109,9 +112,9 @@ compute_mixed_layer_depth!(simulation) = MixedLayerDepth!(h, simulation.model.tr
 # add the function to the callbacks of the simulation
 simulation.callbacks[:compute_mld] = Callback(compute_mixed_layer_depth!)
 
-compute_light_growth!(simulation) = LightGrowth!(light_growth, h, simulation.model.tracers.P, light_function, light_growth_function, time(simulation), average, shading, chl2c)
-# add the function to the callbacks of the simulation
-simulation.callbacks[:compute_light_growth] = Callback(compute_light_growth!)
+# compute_light_growth!(simulation) = LightGrowth!(light_growth, h, simulation.model.tracers.P, light_function, light_growth_function, time(simulation), average, shading, chl2c)
+# # add the function to the callbacks of the simulation
+# simulation.callbacks[:compute_light_growth] = Callback(compute_light_growth!)
 
 # zeroing negative values
 zero_P(sim) = parent(sim.model.tracers.P) .= max.(0, parent(sim.model.tracers.P))
