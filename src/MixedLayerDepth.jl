@@ -34,7 +34,7 @@ using Oceananigans.Grids
             Δz_ijk = z_face_above-z_face
             
             # interpolate linearly to obtain the mld
-            mld_ij = -((Δz_ijk/(Δb_ijk_above-Δb_ijk))*(Δb-Δb_ijk)+z_face)
+            mld_ij = max(-((Δz_ijk/(Δb_ijk_above-Δb_ijk))*(Δb-Δb_ijk)+z_face), 0)
             
             # stop searching (skip this calculation for other levels)
             searching_mld=false
