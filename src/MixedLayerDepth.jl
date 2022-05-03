@@ -23,12 +23,12 @@ using Oceananigans.Grids
         # if below mixed layer and we havent yet found it
         if (Δb_ijk>Δb)&(searching_mld)
             # buoyancy and buoyancy decrease for the cell above
-            b_ijk_above = @inbounds b[i, j, k-1]
+            b_ijk_above = @inbounds b[i, j, k+1]
             Δb_ijk_above = b_surface-b_ijk_above
             
             # height for both cells
             z_face = znode(Center(), Center(), Face(), i, j, k, grid)
-            z_face_above = znode(Center(), Center(), Face(), i, j, k-1, grid)
+            z_face_above = znode(Center(), Center(), Face(), i, j, k+1, grid)
             
             # get Δz and Δb
             Δz_ijk = z_face_above-z_face
